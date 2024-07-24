@@ -77,16 +77,15 @@ class Decoder(nn.Module):
         self.lm_head = nn.Linear(hidden_size, vocab_size)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, targets, attention_mask, encodings, h_p, c_p):
+    def forward(self, targets, attention_mask, encodings, h, c):
         outputs = []
         # don't forward EOS
         for i in range(len(targets)-1):
             embeddings = self.embedding(targets[i])
             embeddings = self.dropout(embeddings)
-            h_n, c_n = self.decoder_cell(embeddings, (h_p, c_p))
-            out = self.attention(h_n, encodings, attention_mask)
+            h, c = self.decoder_cell(embeddings, (h, c))
+            out = self.attention(h, encodings, attention_mask)
             outputs.append(out)
-            h_p, c_p = h_n, c_n
         # batch first <- seq first
         outputs = torch.stack(outputs).transpose(0, 1)
         seq_logits = self.lm_head(outputs)
