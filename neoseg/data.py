@@ -82,18 +82,16 @@ class DataModule(pl.LightningDataModule):
     def collate_fn(self, items):
         input_texts, target_texts, target_classes = [], [], []
         for item in items:
-            input_texts.append(self.tokenizer.bos_token+item.derived)
+            input_texts.append(item.derived + self.tokenizer.eos_token)
             if item.type == "prefix":
                 target_classes.append(1)
-                #                      prefix                                   base
-                target_texts.append(f"{item.morpheme}{self.tokenizer.sep_token}{item.base}{self.tokenizer.eos_token}")
+                target_text = f"{item.morpheme}{self.tokenizer.sep_token}{item.base}"
             else:
                 target_classes.append(0)
-                #                      base                                 suffix
-                target_texts.append(f"{item.base}{self.tokenizer.sep_token}{item.morpheme}{self.tokenizer.eos_token}")
+                target_text = f"{item.base}{self.tokenizer.sep_token}{item.morpheme}"
+            target_texts.append(self.tokenizer.bos_token + target_text + self.tokenizer.eos_token)
+
         inputs = self.tokenizer(input_texts, **self.tokenizer_kwargs)
         targets = self.tokenizer(target_texts, **self.tokenizer_kwargs)['input_ids']
-        # mask padded sequence
-        targets[targets == self.tokenizer.pad_token_id] = self.trainer.lightning_module.loss_fct.ignore_index
         target_classes = torch.tensor(target_classes)
         return inputs, targets, target_classes
