@@ -51,7 +51,8 @@ class DataModule(pl.LightningDataModule):
         self.data_kwargs = asdict(data_kwargs)
         self.tokenizer = PreTrainedTokenizerFast.from_pretrained(tokenizer_name)
         vocab = self.tokenizer.vocab
-        assert self.PRE_TOKEN in vocab and self.SUFF_TOKEN in vocab
+        self.pre_token_id = vocab[self.PRE_TOKEN]
+        self.suff_token_id = vocab[self.SUFF_TOKEN]
         self.tokenizer_kwargs = asdict(tokenizer_kwargs)
 
     def prepare_data(self):
@@ -89,10 +90,10 @@ class DataModule(pl.LightningDataModule):
         for item in items:
             input_texts.append(item.derived + self.tokenizer.eos_token)
             if item.type == "prefix":
-                target_classes.append(1)
+                target_classes.append(True)
                 target_text = f"{item.morpheme}{self.PRE_TOKEN}{item.base}"
             else:
-                target_classes.append(0)
+                target_classes.append(False)
                 target_text = f"{item.base}{self.SUFF_TOKEN}{item.morpheme}"
             target_texts.append(self.tokenizer.bos_token + target_text + self.tokenizer.eos_token)
 

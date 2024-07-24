@@ -69,8 +69,9 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, input_size, hidden_size, encoding_dim, dropout, bias):
+    def __init__(self, vocab_size, max_length, input_size, hidden_size, encoding_dim, dropout, bias):
         super().__init__()
+        self.max_length = max_length
         self.embedding = nn.Embedding(vocab_size, input_size, padding_idx=0)
         self.attention = AttentionLayer(hidden_size, encoding_dim, hidden_size, bias=bias)
         self.decoder_cell = nn.LSTMCell(input_size, hidden_size, bias=bias)
@@ -89,3 +90,26 @@ class Decoder(nn.Module):
         outputs = torch.stack(outputs)
         seq_logits = self.lm_head(outputs)
         return seq_logits
+
+    @torch.no_grad
+    def generate(self, bos, attention_mask, encodings, h, c, eos_id):
+        predictions = [bos]
+        batch_size = bos.shape[0]
+        reached_eos = torch.zeros(batch_size, dtype=bool, device=bos.device)
+        for _ in range(self.max_length):
+            embeddings = self.embedding(predictions[-1])
+            embeddings = self.dropout(embeddings)
+            h, c = self.decoder_cell(embeddings, (h, c))
+            out = self.attention(h, encodings, attention_mask)
+            logits = self.lm_head(out)
+
+            # greedy decoding
+            pred = logits.argmax(1)
+            predictions.append(pred)
+
+            reached_eos[pred==eos_id] = True
+            if reached_eos.all():
+                break
+
+        # discard BOS
+        return torch.stack(predictions[1:])
