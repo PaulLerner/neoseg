@@ -96,7 +96,13 @@ class DataModule(pl.LightningDataModule):
                 target_text = f"{item.base}{self.SUFF_TOKEN}{item.morpheme}"
             target_texts.append(self.tokenizer.bos_token + target_text + self.tokenizer.eos_token)
 
-        inputs = self.tokenizer(input_texts, **self.tokenizer_kwargs)
-        targets = self.tokenizer(target_texts, **self.tokenizer_kwargs)['input_ids']
         target_classes = torch.tensor(target_classes)
+        # batch first -> seq first
+        inputs = self.tokenizer(input_texts, **self.tokenizer_kwargs)
+        for k, v in inputs.items():
+            inputs[k] = v.transpose(0, 1)
+        targets = self.tokenizer(target_texts, **self.tokenizer_kwargs)['input_ids'].transpose(0, 1)
+        # transformers -> 1 for real token, 0 for padding
+        # torch masked_fill_ -> Fill True, leave False
+        inputs["attention_mask"] = ~inputs["attention_mask"].bool()
         return inputs, targets, target_classes

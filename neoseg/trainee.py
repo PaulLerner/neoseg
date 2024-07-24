@@ -71,32 +71,29 @@ class Trainee(pl.LightningModule):
         self.seq_loss_fct = nn.CrossEntropyLoss()
 
     def forward(self, input_ids, attention_mask, targets, token_type_ids=None):
-        # batch first -> seq first
-        input_ids = input_ids.transpose(0, 1)
-        attention_mask = attention_mask.transpose(0, 1)
-        targets = targets.transpose(0, 1)
-        # transformers -> 1 for real token, 0 for padding
-        # torch masked_fill_ -> Fill True, leave False
-        attention_mask = ~attention_mask.bool()
-
         encodings, (h, c) = self.encoder(input_ids)
         seq_logits = self.decoder(targets, attention_mask, encodings, h, c)
-        return seq_logits, None
+        return seq_logits
 
-    def step(self, batch, batch_idx=None, stage="train"):
+    @torch.no_grad
+    def decode(self):
+        pass
+
+    def training_step(self, batch, batch_idx=None):
         inputs, targets, target_classes = batch
+        batch_size = inputs["input_ids"].shape[1]
         # clone targets because we need to mask padding below and that would cause
         # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation"
-        seq_logits, classif_logits = self(**inputs, targets=targets.clone())
+        seq_logits = self(**inputs, targets=targets.clone())
 
         # mask padded sequence
         targets[targets == self.trainer.datamodule.tokenizer.pad_token_id] = self.seq_loss_fct.ignore_index
         # discard BOS token
-        targets = targets[:, 1:].contiguous().view(-1)
+        targets = targets[1:].contiguous().view(-1)
         seq_logits = seq_logits.view(-1, self.vocab_size)
 
         seq_loss = self.seq_loss_fct(seq_logits, targets)
-        self.log(f"{stage}/seq_loss", seq_loss)
+        self.log("train/seq_loss", seq_loss, batch_size=batch_size)
         return dict(loss=seq_loss)
 
     def log(self, name, value, **kwargs):
@@ -105,14 +102,26 @@ class Trainee(pl.LightningModule):
             return None
         super().log(name, value, **kwargs)
 
-    def training_step(self, batch, batch_idx):
-        return self.step(batch, batch_idx)
+    def eval_step(self, batch, batch_idx):
+        inputs, targets, target_classes = batch
+        batch_size = inputs["input_ids"].shape[1]
+        seq_logits = self(**inputs, targets=targets.clone())
+
+        # mask padded sequence
+        targets[targets == self.trainer.datamodule.tokenizer.pad_token_id] = self.seq_loss_fct.ignore_index
+        # discard BOS token
+        targets = targets[1:].contiguous().view(-1)
+        seq_logits = seq_logits.view(-1, self.vocab_size)
+
+        seq_loss = self.seq_loss_fct(seq_logits, targets)
+        self.log("eval/seq_loss", seq_loss, batch_size=batch_size)
+        return dict(loss=seq_loss)
 
     def validation_step(self, batch, batch_idx):
-        return self.step(batch, batch_idx, stage="validation")
+        return self.eval_step(batch, batch_idx)
 
     def test_step(self, batch, batch_idx):
-        return self.step(batch, batch_idx, stage="test")
+        return self.eval_step(batch, batch_idx)
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""

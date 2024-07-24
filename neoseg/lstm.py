@@ -86,7 +86,6 @@ class Decoder(nn.Module):
             h, c = self.decoder_cell(embeddings, (h, c))
             out = self.attention(h, encodings, attention_mask)
             outputs.append(out)
-        # batch first <- seq first
-        outputs = torch.stack(outputs).transpose(0, 1)
+        outputs = torch.stack(outputs)
         seq_logits = self.lm_head(outputs)
         return seq_logits
