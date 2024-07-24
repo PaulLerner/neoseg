@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import LambdaLR
 
 import pytorch_lightning as pl
 
-from .lstm import Encoder, Decoder, AttentionLayer
+from .lstm import Encoder, Decoder
 
 
 @dataclass
@@ -52,7 +52,7 @@ def batched_cpu(batch):
 
 
 class Trainee(pl.LightningModule):
-    def __init__(self, *args, vocab_size=None, classif_loss_weight=0.5, warmup_steps=0, lr=2e-5, betas=(0.9, 0.999), eps=1e-08,
+    def __init__(self, *args, vocab_size=None, warmup_steps=0, lr=2e-5, betas=(0.9, 0.999), eps=1e-08,
                  weight_decay=1e-2, lstm_kwargs: LSTMKwargs = LSTMKwargs(), **kwargs):
         super().__init__(*args, **kwargs)
         self.vocab_size = vocab_size
@@ -61,7 +61,6 @@ class Trainee(pl.LightningModule):
                                dropout=lstm_kwargs.dropout, bias=lstm_kwargs.bias)
         # tie embeddings
         self.decoder.embedding.weight = self.encoder.embedding.weight
-        self.classifier = nn.Linear(self.encoder.dim, 1)
 
         # scheduling and optimization
         self.warmup_steps = warmup_steps
@@ -70,8 +69,6 @@ class Trainee(pl.LightningModule):
         self.eps = eps
         self.weight_decay = weight_decay
         self.seq_loss_fct = nn.CrossEntropyLoss()
-        self.classif_loss_fct = nn.BCEWithLogitsLoss()
-        self.classif_loss_weight = classif_loss_weight
 
     def forward(self, input_ids, attention_mask, targets, token_type_ids=None):
         # batch first -> seq first
@@ -99,8 +96,6 @@ class Trainee(pl.LightningModule):
         seq_logits = seq_logits.view(-1, self.vocab_size)
 
         seq_loss = self.seq_loss_fct(seq_logits, targets)
-      #  classif_loss = self.classif_loss_fct(classif_logits, target_classes)
-       # total_loss = (1-self.classif_loss_weight)*seq_loss + self.classif_loss_weight * classif_loss
         self.log(f"{stage}/seq_loss", seq_loss)
         return dict(loss=seq_loss)
 
