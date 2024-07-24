@@ -10,6 +10,7 @@ from torchmetrics import MetricCollection
 from torchmetrics.classification import BinaryAccuracy, BinaryPrecision, BinaryRecall, BinaryF1Score
 
 from .lstm import Encoder, Decoder
+from .metrics import ExactMatch
 
 
 @dataclass
@@ -76,6 +77,7 @@ class Trainee(pl.LightningModule):
         self.classification_metrics = MetricCollection([
             BinaryAccuracy(), BinaryPrecision(), BinaryRecall(), BinaryF1Score()
         ], prefix="eval/")
+        self.exact_match = ExactMatch()
 
     def forward(self, input_ids, attention_mask, targets, token_type_ids=None):
         encodings, (h, c) = self.encoder(input_ids)
@@ -119,6 +121,9 @@ class Trainee(pl.LightningModule):
         output_classes = (predictions==self.trainer.datamodule.pre_token_id).any(axis=0)
         classification_metrics = self.classification_metrics(preds=output_classes, target=target_classes)
         self.log_dict(classification_metrics, batch_size=batch_size)
+        em = self.exact_match(preds=predictions.T, target=targets[1:].T,
+                              eos_id=self.trainer.datamodule.tokenizer.eos_token_id)
+        self.log("eval/em", em, batch_size=batch_size)
 
     def validation_step(self, batch, batch_idx):
         return self.eval_step(batch, batch_idx)
@@ -143,8 +148,11 @@ class Trainee(pl.LightningModule):
 
     def on_eval_epoch_end(self):
         classification_metrics = self.classification_metrics.compute()
+        em = self.exact_match.compute()
         self.log_dict(classification_metrics)
+        self.log("eval/em", em)
         self.classification_metrics.reset()
+        self.exact_match.reset()
 
     def on_test_epoch_end(self):
         self.on_eval_epoch_end()
