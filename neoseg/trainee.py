@@ -79,14 +79,14 @@ class Trainee(pl.LightningModule):
         ], prefix="eval/")
         self.exact_match = ExactMatch()
 
-    def forward(self, input_ids, attention_mask, targets, token_type_ids=None):
-        encodings, (h, c) = self.encoder(input_ids)
+    def forward(self, input_ids, attention_mask, lengths, targets, token_type_ids=None):
+        encodings, (h, c) = self.encoder(input_ids, lengths)
         seq_logits = self.decoder(targets, attention_mask, encodings, h, c)
         return seq_logits
 
     @torch.no_grad
-    def generate(self, input_ids, attention_mask, targets, token_type_ids=None):
-        encodings, (h, c) = self.encoder(input_ids)
+    def generate(self, input_ids, attention_mask, lengths, targets, token_type_ids=None):
+        encodings, (h, c) = self.encoder(input_ids, lengths)
         predictions = self.decoder.generate(targets[0], attention_mask, encodings, h, c,
                                             eos_id=self.trainer.datamodule.tokenizer.eos_token_id)
         return predictions

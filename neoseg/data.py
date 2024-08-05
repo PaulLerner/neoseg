@@ -98,12 +98,25 @@ class DataModule(pl.LightningDataModule):
             target_texts.append(self.tokenizer.bos_token + target_text + self.tokenizer.eos_token)
 
         target_classes = torch.tensor(target_classes)
-        # batch first -> seq first
         inputs = self.tokenizer(input_texts, **self.tokenizer_kwargs)
+
+        # used in pack_padded_sequence
+        input_lengths = []
+        for input_id in inputs["input_ids"]:
+            where = (input_id == self.tokenizer.eos_token_id).nonzero()
+            if len(where) == 1:
+                input_lengths.append(where[0, 0] + 1)
+            elif len(where) > 1:
+                raise ValueError(f"Found multiple {self.tokenizer.eos_token_id=} in {input_id=}")
+            else:
+                input_lengths.append(len(input_id))
+
+        # batch first -> seq first
         for k, v in inputs.items():
             inputs[k] = v.transpose(0, 1)
         targets = self.tokenizer(target_texts, **self.tokenizer_kwargs)['input_ids'].transpose(0, 1)
         # transformers -> 1 for real token, 0 for padding
         # torch masked_fill_ -> Fill True, leave False
         inputs["attention_mask"] = ~inputs["attention_mask"].bool()
+        inputs["lengths"] = torch.tensor(input_lengths, dtype=int)
         return inputs, targets, target_classes

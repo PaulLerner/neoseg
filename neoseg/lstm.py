@@ -52,9 +52,10 @@ class Encoder(nn.Module):
             self.hidden_proj = nn.Linear(self.dim, lstm_kwargs.hidden_size)
             self.cell_proj = nn.Linear(self.dim, lstm_kwargs.hidden_size)
 
-    def forward(self, input_ids):
+    def forward(self, input_ids, lengths):
         embeddings = self.embedding(input_ids)
         embeddings = self.dropout(embeddings)
+        embeddings = nn.utils.rnn.pack_padded_sequence(embeddings, lengths.cpu(), enforce_sorted=False)
         encodings, (h, c) = self.lstm(embeddings)
         # concatenate hidden states of both directions of the last layer and project them back to decoder space
         if self.lstm.bidirectional:
@@ -65,6 +66,7 @@ class Encoder(nn.Module):
         else:
             h = h[-1]
             c = c[-1]
+        encodings, _ = nn.utils.rnn.pad_packed_sequence(encodings)
         return encodings, (h, c)
 
 
