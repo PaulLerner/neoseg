@@ -4,6 +4,7 @@ import torch
 from torch import nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
+from entmax.losses import Entmax15Loss
 
 import pytorch_lightning as pl
 from torchmetrics import MetricCollection
@@ -54,9 +55,14 @@ def batched_cpu(batch):
     return {k: (v.detach().cpu() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
 
 
+LOSSES = dict(
+    entmax = Entmax15Loss,
+    crossentropy = nn.CrossEntropyLoss
+)
+
 class Trainee(pl.LightningModule):
-    def __init__(self, *args, max_length=None, vocab_size=None, warmup_steps=0, lr=2e-5, betas=(0.9, 0.999), eps=1e-08,
-                 weight_decay=1e-2, lstm_kwargs: LSTMKwargs = LSTMKwargs(), **kwargs):
+    def __init__(self, *args, loss = "crossentropy", max_length=None, vocab_size=None, warmup_steps=0, lr=2e-5,
+                 betas=(0.9, 0.999), eps=1e-08, weight_decay=1e-2, lstm_kwargs: LSTMKwargs = LSTMKwargs(), **kwargs):
         super().__init__(*args, **kwargs)
         self.vocab_size = vocab_size
         self.encoder = Encoder(self.vocab_size, lstm_kwargs)
@@ -72,7 +78,7 @@ class Trainee(pl.LightningModule):
         self.betas = betas
         self.eps = eps
         self.weight_decay = weight_decay
-        self.seq_loss_fct = nn.CrossEntropyLoss()
+        self.seq_loss_fct = LOSSES[loss]()
 
         # metrics
         self.classification_metrics = MetricCollection([
