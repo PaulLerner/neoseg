@@ -61,7 +61,8 @@ class Trainee(pl.LightningModule):
         self.vocab_size = vocab_size
         self.encoder = Encoder(self.vocab_size, lstm_kwargs)
         self.decoder = Decoder(self.vocab_size, max_length, lstm_kwargs.input_size, lstm_kwargs.hidden_size,
-                               self.encoder.dim, dropout=lstm_kwargs.dropout, bias=lstm_kwargs.bias)
+                               lstm_kwargs.num_layers, self.encoder.dim, dropout=lstm_kwargs.dropout,
+                               bias=lstm_kwargs.bias)
         # tie embeddings
         self.decoder.embedding.weight = self.encoder.embedding.weight
 

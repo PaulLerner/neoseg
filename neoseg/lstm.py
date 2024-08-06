@@ -57,37 +57,49 @@ class Encoder(nn.Module):
         embeddings = self.dropout(embeddings)
         embeddings = nn.utils.rnn.pack_padded_sequence(embeddings, lengths.cpu(), enforce_sorted=False)
         encodings, (h, c) = self.lstm(embeddings)
-        # concatenate hidden states of both directions of the last layer and project them back to decoder space
+        # concatenate hidden states of both directions and project them back to decoder space
         if self.lstm.bidirectional:
-            h = h.view(self.lstm.num_layers, 2, -1, self.lstm.hidden_size).transpose(1, 2).contiguous().view(self.lstm.num_layers, -1, self.dim)[-1]
+            h = h.view(self.lstm.num_layers, 2, -1, self.lstm.hidden_size).transpose(1, 2).contiguous().view(self.lstm.num_layers, -1, self.dim)
             h = self.hidden_proj(h)
-            c = c.view(self.lstm.num_layers, 2, -1, self.lstm.hidden_size).transpose(1, 2).contiguous().view(self.lstm.num_layers, -1, self.dim)[-1]
+            c = c.view(self.lstm.num_layers, 2, -1, self.lstm.hidden_size).transpose(1, 2).contiguous().view(self.lstm.num_layers, -1, self.dim)
             c = self.hidden_proj(c)
-        else:
-            h = h[-1]
-            c = c[-1]
         encodings, _ = nn.utils.rnn.pad_packed_sequence(encodings)
         return encodings, (h, c)
 
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, max_length, input_size, hidden_size, encoding_dim, dropout, bias):
+    """Adapted from https://github.com/facebookresearch/fairseq/blob/main/fairseq/models/lstm.py"""
+    def __init__(self, vocab_size, max_length, input_size, hidden_size, num_layers, encoding_dim, dropout, bias):
         super().__init__()
         self.max_length = max_length
         self.embedding = nn.Embedding(vocab_size, input_size, padding_idx=0)
         self.attention = AttentionLayer(hidden_size, encoding_dim, hidden_size, bias=bias)
-        self.decoder_cell = nn.LSTMCell(input_size, hidden_size, bias=bias)
+        self.layers = nn.ModuleList([
+            nn.LSTMCell(
+                input_size=input_size if layer == 0 else hidden_size,
+                hidden_size=hidden_size,
+                bias=bias
+            )
+            for layer in range(num_layers)
+        ])
         self.lm_head = nn.Linear(hidden_size, vocab_size)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, targets, attention_mask, encodings, h, c):
         outputs = []
+        # using list to avoid
+        # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation"
+        h, c = list(h), list(c)
         # don't forward EOS
         for i in range(len(targets)-1):
             embeddings = self.embedding(targets[i])
-            embeddings = self.dropout(embeddings)
-            h, c = self.decoder_cell(embeddings, (h, c))
-            out = self.attention(h, encodings, attention_mask)
+            inputs = self.dropout(embeddings)
+            for j, rnn in enumerate(self.layers):
+                h[j], c[j] = rnn(inputs, (h[j], c[j]))
+                # input for the next layer = hidden state of previous layer
+                inputs = self.dropout(h[j])
+            # attention using the hidden states of the last layer
+            out = self.attention(h[-1], encodings, attention_mask)
             outputs.append(out)
         outputs = torch.stack(outputs)
         seq_logits = self.lm_head(outputs)
@@ -100,9 +112,13 @@ class Decoder(nn.Module):
         reached_eos = torch.zeros(batch_size, dtype=bool, device=bos.device)
         for _ in range(self.max_length):
             embeddings = self.embedding(predictions[-1])
-            embeddings = self.dropout(embeddings)
-            h, c = self.decoder_cell(embeddings, (h, c))
-            out = self.attention(h, encodings, attention_mask)
+            inputs = self.dropout(embeddings)
+            for j, rnn in enumerate(self.layers):
+                h[j], c[j] = rnn(inputs, (h[j], c[j]))
+                # input for the next layer = hidden state of previous layer
+                inputs = self.dropout(h[j])
+            # attention using the hidden states of the last layer
+            out = self.attention(h[-1], encodings, attention_mask)
             logits = self.lm_head(out)
 
             # greedy decoding
