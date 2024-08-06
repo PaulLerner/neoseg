@@ -110,7 +110,8 @@ class Decoder(nn.Module):
         predictions = [bos]
         batch_size = bos.shape[0]
         reached_eos = torch.zeros(batch_size, dtype=bool, device=bos.device)
-        for _ in range(self.max_length):
+        # there is already one pred (BOS), so max_length - 1
+        for _ in range(self.max_length - 1):
             embeddings = self.embedding(predictions[-1])
             inputs = self.dropout(embeddings)
             for j, rnn in enumerate(self.layers):
