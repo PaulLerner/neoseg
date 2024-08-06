@@ -81,7 +81,7 @@ class Trainee(pl.LightningModule):
             BinaryAccuracy(), BinaryPrecision(), BinaryRecall(), BinaryF1Score()
         ], prefix="eval/")
         self.exact_match = ExactMatch()
-        self.output_text = []
+        self.output_texts = []
 
     def forward(self, input_ids, attention_mask, lengths, targets, token_type_ids=None):
         encodings, (h, c) = self.encoder(input_ids, lengths)
@@ -135,8 +135,15 @@ class Trainee(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         predictions = self.eval_step(batch, batch_idx)
-        output_text = self.trainer.datamodule.tokenizer.batch_decode(predictions, skip_special_tokens=False)
-        self.output_text.extend(output_text)
+        output_texts = self.trainer.datamodule.tokenizer.batch_decode(predictions, skip_special_tokens=False)
+        self.output_texts.extend(output_texts)
+
+    def predict_step(self, batch, batch_idx):
+        inputs, targets, _ = batch
+        batch_size = inputs["input_ids"].shape[1]
+        predictions = self.generate(**inputs, targets=targets).T
+        output_texts = self.trainer.datamodule.tokenizer.batch_decode(predictions, skip_special_tokens=False)
+        self.output_texts.extend(output_texts)
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""
@@ -165,7 +172,10 @@ class Trainee(pl.LightningModule):
         self.on_eval_epoch_end()
         log_dir = Path(self.trainer.log_dir)
         with open(log_dir/"output_text.json", "wt") as file:
-            json.dump(self.output_text, file)
+            json.dump(self.output_texts, file)
+
+    def on_predict_epoch_end(self):
+        self.trainer.datamodule.save_predictions(self.output_texts)
 
     def on_validation_epoch_end(self):
         self.on_eval_epoch_end()
