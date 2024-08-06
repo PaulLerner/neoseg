@@ -1,4 +1,6 @@
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -79,6 +81,7 @@ class Trainee(pl.LightningModule):
             BinaryAccuracy(), BinaryPrecision(), BinaryRecall(), BinaryF1Score()
         ], prefix="eval/")
         self.exact_match = ExactMatch()
+        self.output_text = []
 
     def forward(self, input_ids, attention_mask, lengths, targets, token_type_ids=None):
         encodings, (h, c) = self.encoder(input_ids, lengths)
@@ -125,12 +128,15 @@ class Trainee(pl.LightningModule):
         em = self.exact_match(preds=predictions, target=targets[1:].T,
                               eos_id=self.trainer.datamodule.tokenizer.eos_token_id)
         self.log("eval/em", em, batch_size=batch_size)
+        return predictions
 
     def validation_step(self, batch, batch_idx):
         return self.eval_step(batch, batch_idx)
 
     def test_step(self, batch, batch_idx):
-        return self.eval_step(batch, batch_idx)
+        predictions = self.eval_step(batch, batch_idx)
+        output_text = self.trainer.datamodule.tokenizer.batch_decode(predictions, skip_special_tokens=False)
+        self.output_text.extend(output_text)
 
     def configure_optimizers(self):
         """Prepare optimizer and schedule (linear warmup and decay)"""
@@ -157,6 +163,9 @@ class Trainee(pl.LightningModule):
 
     def on_test_epoch_end(self):
         self.on_eval_epoch_end()
+        log_dir = Path(self.trainer.log_dir)
+        with open(log_dir/"output_text.json", "wt") as file:
+            json.dump(self.output_text, file)
 
     def on_validation_epoch_end(self):
         self.on_eval_epoch_end()
