@@ -117,11 +117,11 @@ class Trainee(pl.LightningModule):
     def eval_step(self, batch, batch_idx):
         inputs, targets, target_classes = batch
         batch_size = inputs["input_ids"].shape[1]
-        predictions = self.generate(**inputs, targets=targets.clone())
-        output_classes = (predictions==self.trainer.datamodule.pre_token_id).any(axis=0)
+        predictions = self.generate(**inputs, targets=targets.clone())[:-1].T
+        output_classes = (predictions==self.trainer.datamodule.pre_token_id).any(axis=1)
         classification_metrics = self.classification_metrics(preds=output_classes, target=target_classes)
         self.log_dict(classification_metrics, batch_size=batch_size)
-        em = self.exact_match(preds=predictions.T, target=targets[1:].T,
+        em = self.exact_match(preds=predictions, target=targets[1:].T,
                               eos_id=self.trainer.datamodule.tokenizer.eos_token_id)
         self.log("eval/em", em, batch_size=batch_size)
 
