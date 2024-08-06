@@ -25,10 +25,12 @@ def tag(tagger, items, lang="fr"):
     for i, item in enumerate(tqdm(items, desc="POS tagging")):
         text = item[lang]["text"].strip()
         pos = []
+        root = None
+        child = None
         for token in tagger(text):
             pos.append(token.pos_)
             # find root
-            if token.dep_ == "ROOT":
+            if root is None and token.dep_ == "ROOT":
                 # keep last child (if any)
                 child = list(token.children)
                 if not child:
