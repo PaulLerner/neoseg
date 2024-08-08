@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass, asdict
 from typing import Optional
 import pandas as pd
+from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
@@ -46,8 +47,8 @@ class DataModule(pl.LightningDataModule):
     PRE_TOKEN = "<pre>"
     SUFF_TOKEN = "<suff>"
 
-    def __init__(self, train_path: str, dev_path: str, test_path: str, tokenizer_name: str = None,
-                 predict_path: str = None, predict_lang: str = "fr",
+    def __init__(self, train_path: Path, dev_path: Path, test_path: Path, tokenizer_name: str = None,
+                 predict_path: Path = None, predict_lang: str = "fr",
                  tokenizer_kwargs: TokenizerKwargs = TokenizerKwargs(), data_kwargs: DataKwargs = DataKwargs()):
         super().__init__()
         self.train_path = train_path
