@@ -1,16 +1,14 @@
 import json
 from dataclasses import dataclass, asdict
-from typing import Optional
-import pandas as pd
 from pathlib import Path
+from typing import Optional
 
+import pandas as pd
+import pytorch_lightning as pl
+import spacy
 import torch
 from torch.utils.data import DataLoader
-
-import pytorch_lightning as pl
-
-import spacy
-from transformers import PreTrainedTokenizerFast
+from transformers import AutoTokenizer
 
 from .poly import tag, MorphLabel
 
@@ -37,18 +35,16 @@ class DataKwargs:
 
 
 def read_pandas(path):
-    #, names=["base", "derived", "source POS", "target POS", "morpheme", "type"]
+    # , names=["base", "derived", "source POS", "target POS", "morpheme", "type"]
     df = pd.read_csv(path, delimiter="\t")
     # get rid of pandas indexing to be compatible with DataLoader
     return [row for _, row in df.iterrows()]
 
 
 class DataModule(pl.LightningDataModule):
-    PRE_TOKEN = "<pre>"
-    SUFF_TOKEN = "<suff>"
-
     def __init__(self, train_path: Path, dev_path: Path, test_path: Path, tokenizer_name: str = None,
                  predict_path: Path = None, predict_lang: str = "fr",
+                 pre_token: str = "<pre>", suff_token: str = "<suff>",
                  tokenizer_kwargs: TokenizerKwargs = TokenizerKwargs(), data_kwargs: DataKwargs = DataKwargs()):
         super().__init__()
         self.train_path = train_path
@@ -57,10 +53,16 @@ class DataModule(pl.LightningDataModule):
         self.predict_path = predict_path
         self.predict_lang = predict_lang
         self.data_kwargs = asdict(data_kwargs)
-        self.tokenizer = PreTrainedTokenizerFast.from_pretrained(tokenizer_name)
-        vocab = self.tokenizer.vocab
-        self.pre_token_id = vocab[self.PRE_TOKEN]
-        self.suff_token_id = vocab[self.SUFF_TOKEN]
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        self.pre_token = pre_token
+        self.suff_token = suff_token
+        if hasattr(self.tokenizer, "vocab"):
+            vocab = self.tokenizer.vocab
+            self.pre_token_id = vocab[self.pre_token]
+            self.suff_token_id = vocab[self.suff_token]
+        else:
+            self.pre_token_id = self.tokenizer.convert_tokens_to_ids(self.pre_token)
+            self.suff_token_id = self.tokenizer.convert_tokens_to_ids(self.suff_token)
         self.tokenizer_kwargs = asdict(tokenizer_kwargs)
 
     def train_dataloader(self):
@@ -109,12 +111,12 @@ class DataModule(pl.LightningDataModule):
 
     def parse_output(self, output_text):
         output_text = output_text.split(self.tokenizer.eos_token)[0].replace(" ", "")
-        prefix_base = output_text.split(self.PRE_TOKEN)
+        prefix_base = output_text.split(self.pre_token)
         if len(prefix_base) == 2:
             morph = [MorphLabel.Prefix.name]
             affix, base = prefix_base
         else:
-            base_suffix = output_text.split(self.SUFF_TOKEN)
+            base_suffix = output_text.split(self.suff_token)
             if len(base_suffix) == 2:
                 morph = [MorphLabel.Suffix.name]
                 base, affix = base_suffix
@@ -150,14 +152,16 @@ class DataModule(pl.LightningDataModule):
             input_texts.append(item.derived + self.tokenizer.eos_token)
             if item.type == "prefix":
                 target_classes.append(True)
-                target_text = f"{item.morpheme}{self.PRE_TOKEN}{item.base}"
+                target_text = f"{item.morpheme}{self.pre_token}{item.base}"
             else:
                 target_classes.append(False)
-                target_text = f"{item.base}{self.SUFF_TOKEN}{item.morpheme}"
+                target_text = f"{item.base}{self.suff_token}{item.morpheme}"
             target_texts.append(self.tokenizer.bos_token + target_text + self.tokenizer.eos_token)
 
         target_classes = torch.tensor(target_classes)
-        inputs = self.tokenizer(input_texts, **self.tokenizer_kwargs)
+        inputs = self.tokenizer(input_texts, add_special_tokens=False, **self.tokenizer_kwargs)
+        for k, v in self.tokenizer(target_texts, add_special_tokens=False, **self.tokenizer_kwargs).items():
+            inputs[f"decoder_{k}"] = v
 
         # used in pack_padded_sequence
         input_lengths = []
@@ -169,13 +173,6 @@ class DataModule(pl.LightningDataModule):
                 raise ValueError(f"Found multiple {self.tokenizer.eos_token_id=} in {input_id=}")
             else:
                 input_lengths.append(len(input_id))
-
-        # batch first -> seq first
-        for k, v in inputs.items():
-            inputs[k] = v.transpose(0, 1)
-        targets = self.tokenizer(target_texts, **self.tokenizer_kwargs)['input_ids'].transpose(0, 1)
-        # transformers -> 1 for real token, 0 for padding
-        # torch masked_fill_ -> Fill True, leave False
-        inputs["attention_mask"] = ~inputs["attention_mask"].bool()
         inputs["lengths"] = torch.tensor(input_lengths, dtype=int)
-        return inputs, targets, target_classes
+
+        return inputs, target_classes

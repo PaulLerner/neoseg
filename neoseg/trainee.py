@@ -10,8 +10,9 @@ from torch.optim.lr_scheduler import LambdaLR
 import pytorch_lightning as pl
 from torchmetrics import MetricCollection
 from torchmetrics.classification import BinaryAccuracy, BinaryPrecision, BinaryRecall, BinaryF1Score
+from transformers import AutoModelForSeq2SeqLM
 
-from .lstm import Encoder, Decoder
+from .lstm import EncoderDecoder
 from .metrics import ExactMatch
 
 
@@ -52,21 +53,18 @@ class LinearLRWithWarmup(LambdaLR):
         )
 
 
-def batched_cpu(batch):
-    return {k: (v.detach().cpu() if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
-
-
 class Trainee(pl.LightningModule):
     def __init__(self, *args, max_length=None, vocab_size=None, warmup_steps=0, lr=2e-5, betas=(0.9, 0.999), eps=1e-08,
-                 weight_decay=1e-2, lstm_kwargs: LSTMKwargs = LSTMKwargs(), **kwargs):
+                 weight_decay=1e-2, lstm_kwargs: LSTMKwargs = LSTMKwargs(), pretrained_model: str = None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.vocab_size = vocab_size
-        self.encoder = Encoder(self.vocab_size, lstm_kwargs)
-        self.decoder = Decoder(self.vocab_size, max_length, lstm_kwargs.input_size, lstm_kwargs.hidden_size,
-                               lstm_kwargs.num_layers, self.encoder.dim, dropout=lstm_kwargs.dropout,
-                               bias=lstm_kwargs.bias)
-        # tie embeddings
-        self.decoder.embedding.weight = self.encoder.embedding.weight
+        if pretrained_model is None:
+            self.batch_first = False
+            self.model = EncoderDecoder(vocab_size, max_length, lstm_kwargs)
+        else:
+            self.batch_first = True
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(pretrained_model)
+            self.model.vocab_size = self.model.config.vocab_size
+        self.max_length = max_length
 
         # scheduling and optimization
         self.warmup_steps = warmup_steps
@@ -83,31 +81,47 @@ class Trainee(pl.LightningModule):
         self.exact_match = ExactMatch()
         self.output_texts = []
 
-    def forward(self, input_ids, attention_mask, lengths, targets, token_type_ids=None):
-        encodings, (h, c) = self.encoder(input_ids, lengths)
-        seq_logits = self.decoder(targets, attention_mask, encodings, h, c)
-        return seq_logits
-
-    @torch.no_grad
-    def generate(self, input_ids, attention_mask, lengths, targets, token_type_ids=None):
-        encodings, (h, c) = self.encoder(input_ids, lengths)
-        predictions = self.decoder.generate(targets[0], attention_mask, encodings, h, c,
-                                            eos_id=self.trainer.datamodule.tokenizer.eos_token_id)
-        return predictions
-
-    def training_step(self, batch, batch_idx=None):
-        inputs, targets, _ = batch
-        batch_size = inputs["input_ids"].shape[1]
+    def prepare_batch(self, batch, training=True):
+        inputs, target_classes = batch
+        batch_size = inputs["input_ids"].shape[0]
         # clone targets because we need to mask padding below and that would cause
         # "RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation"
-        seq_logits = self(**inputs, targets=targets.clone())
+        targets = inputs["decoder_input_ids"].clone()
+
+        # keep only BOS
+        if not training:
+            inputs["decoder_input_ids"] = inputs["decoder_input_ids"][:, 0].unsqueeze(1)
+            inputs["decoder_attention_mask"] = inputs["decoder_attention_mask"][:, 0].unsqueeze(1)
+
+        if self.batch_first:
+            inputs.pop("lengths")
+        else:
+            # batch first -> seq first
+            for k, v in inputs.items():
+                inputs[k] = v.transpose(0, 1)
+            targets = targets.transpose(0, 1)
+
+            # transformers -> 1 for real token, 0 for padding
+            # torch masked_fill_ -> Fill True, leave False
+            inputs["attention_mask"] = ~inputs["attention_mask"].bool()
+            inputs["decoder_attention_mask"] = ~inputs["decoder_attention_mask"].bool()
+
+        return inputs, targets, target_classes, batch_size
+
+    def training_step(self, batch, batch_idx=None):
+        inputs, targets, _, batch_size = self.prepare_batch(batch)
+        seq_logits = self.model(**inputs)["logits"]
 
         # mask padded sequence
         targets[targets == self.trainer.datamodule.tokenizer.pad_token_id] = self.seq_loss_fct.ignore_index
         # discard BOS token
-        targets = targets[1:].contiguous().view(-1)
-        seq_logits = seq_logits.view(-1, self.vocab_size)
-
+        if self.batch_first:
+            targets = targets[:, 1:].contiguous().view(-1)
+            # discard EOS (handled differently with LSTM)
+            seq_logits = seq_logits[:, :-1].contiguous()
+        else:
+            targets = targets[1:].contiguous().view(-1)
+        seq_logits = seq_logits.view(-1, self.model.vocab_size)
         seq_loss = self.seq_loss_fct(seq_logits, targets)
         self.log("train/seq_loss", seq_loss, batch_size=batch_size)
         return dict(loss=seq_loss)
@@ -119,13 +133,17 @@ class Trainee(pl.LightningModule):
         super().log(name, value, **kwargs)
 
     def eval_step(self, batch, batch_idx):
-        inputs, targets, target_classes = batch
-        batch_size = inputs["input_ids"].shape[1]
-        predictions = self.generate(**inputs, targets=targets).T
+        inputs, targets, target_classes, batch_size = self.prepare_batch(batch, training=False)
+        predictions = self.model.generate(**inputs, max_length=self.max_length)
+        if self.batch_first:
+            targets = targets[:, 1:]
+        else:
+            predictions = predictions.T
+            targets = targets[1:].T
         output_classes = (predictions==self.trainer.datamodule.pre_token_id).any(axis=1)
         classification_metrics = self.classification_metrics(preds=output_classes, target=target_classes)
         self.log_dict(classification_metrics, batch_size=batch_size)
-        em = self.exact_match(preds=predictions, target=targets[1:].T,
+        em = self.exact_match(preds=predictions, target=targets,
                               eos_id=self.trainer.datamodule.tokenizer.eos_token_id)
         self.log("eval/em", em, batch_size=batch_size)
         return predictions
@@ -139,9 +157,8 @@ class Trainee(pl.LightningModule):
         self.output_texts.extend(output_texts)
 
     def predict_step(self, batch, batch_idx):
-        inputs, targets, _ = batch
-        batch_size = inputs["input_ids"].shape[1]
-        predictions = self.generate(**inputs, targets=targets).T
+        inputs, _, _, batch_size = self.prepare_batch(batch, training=False)
+        predictions = self.generate(**inputs).T
         output_texts = self.trainer.datamodule.tokenizer.batch_decode(predictions, skip_special_tokens=False)
         self.output_texts.extend(output_texts)
 

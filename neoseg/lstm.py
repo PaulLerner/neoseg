@@ -132,3 +132,34 @@ class Decoder(nn.Module):
 
         # discard BOS
         return torch.stack(predictions[1:])
+
+
+class EncoderDecoder(nn.Module):
+    def __init__(self, vocab_size, max_length, lstm_kwargs):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.encoder = Encoder(self.vocab_size, lstm_kwargs)
+        self.decoder = Decoder(self.vocab_size, max_length, lstm_kwargs.input_size, lstm_kwargs.hidden_size,
+                               lstm_kwargs.num_layers, self.encoder.dim, dropout=lstm_kwargs.dropout,
+                               bias=lstm_kwargs.bias)
+        # tie embeddings
+        self.decoder.embedding.weight = self.encoder.embedding.weight
+
+    def forward(self, input_ids, attention_mask, lengths, decoder_input_ids, decoder_attention_mask=None,
+                token_type_ids=None, return_dict=True):
+        assert return_dict
+
+        encodings, (h, c) = self.encoder(input_ids, lengths)
+        seq_logits = self.decoder(decoder_input_ids, attention_mask, encodings, h, c)
+        return {"logits": seq_logits}
+
+    @torch.no_grad
+    def generate(self, input_ids, attention_mask, lengths, decoder_input_ids, decoder_attention_mask=None,
+                 token_type_ids=None, return_dict_in_generate=True, max_length=None):
+        assert max_length == self.decoder.max_length
+        assert return_dict_in_generate
+
+        encodings, (h, c) = self.encoder(input_ids, lengths)
+        predictions = self.decoder.generate(decoder_input_ids[0], attention_mask, encodings, h, c,
+                                            eos_id=self.trainer.datamodule.tokenizer.eos_token_id)
+        return {"sequences": predictions}
