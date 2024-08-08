@@ -9,11 +9,8 @@ import enum
 class MorphLabel(enum.Enum):
     Prefix = 0
     Suffix = 1
-    Neoclassical = 2
-    Compound = 3
-    Syntagm = 4
-    # Affixation | Neoclassical
-    Neoaffix = 5
+    Compound = 2
+    Syntagm = 3
 
 
 # noun noun compounds OR verb noun compounds OR verb verb compounds (always with optional punct like dash N-N)
