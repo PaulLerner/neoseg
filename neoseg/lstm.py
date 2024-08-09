@@ -130,8 +130,7 @@ class Decoder(nn.Module):
             if reached_eos.all():
                 break
 
-        # discard BOS
-        return torch.stack(predictions[1:])
+        return torch.stack(predictions)
 
 
 class EncoderDecoder(nn.Module):

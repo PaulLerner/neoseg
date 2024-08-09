@@ -140,6 +140,8 @@ class Trainee(pl.LightningModule):
         else:
             predictions = predictions.T
             targets = targets[1:].T
+        # discard BOS
+        predictions = predictions[:, 1:]
         output_classes = (predictions==self.trainer.datamodule.pre_token_id).any(axis=1)
         classification_metrics = self.classification_metrics(preds=output_classes, target=target_classes)
         self.log_dict(classification_metrics, batch_size=batch_size)
@@ -158,7 +160,11 @@ class Trainee(pl.LightningModule):
 
     def predict_step(self, batch, batch_idx):
         inputs, _, _, batch_size = self.prepare_batch(batch, training=False)
-        predictions = self.generate(**inputs).T
+        predictions = self.generate(**inputs, max_length=self.max_length)
+        if not self.batch_first:
+            predictions = predictions.T
+        # discard BOS
+        predictions = predictions[:, 1:]
         output_texts = self.trainer.datamodule.tokenizer.batch_decode(predictions, skip_special_tokens=False)
         self.output_texts.extend(output_texts)
 
