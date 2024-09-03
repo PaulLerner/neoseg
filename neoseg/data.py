@@ -43,7 +43,7 @@ def read_pandas(path):
 
 class DataModule(pl.LightningDataModule):
     def __init__(self, train_path: Path, dev_path: Path, test_path: Path, tokenizer_name: str = None,
-                 predict_path: Path = None, predict_lang: str = "fr",
+                 predict_path: Path = None, predict_lang: str = "fr", predict_prefix: str = "neoseg",
                  pre_token: str = "<pre>", suff_token: str = "<suff>",
                  tokenizer_kwargs: TokenizerKwargs = TokenizerKwargs(), data_kwargs: DataKwargs = DataKwargs()):
         super().__init__()
@@ -52,6 +52,7 @@ class DataModule(pl.LightningDataModule):
         self.test_path = test_path
         self.predict_path = predict_path
         self.predict_lang = predict_lang
+        self.predict_prefix = predict_prefix
         self.data_kwargs = asdict(data_kwargs)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.pre_token = pre_token
@@ -99,7 +100,7 @@ class DataModule(pl.LightningDataModule):
         self.predict_indices = {}
         predict_texts = []
         for name, subset in self.predict_set.items():
-            indices, texts = tag(tagger, subset, lang=self.predict_lang)
+            indices, texts = tag(tagger, subset, lang=self.predict_lang, predict_prefix=predict_prefix)
             self.predict_indices[name] = indices
             predict_texts.extend(texts)
         return DataLoader(
@@ -130,9 +131,9 @@ class DataModule(pl.LightningDataModule):
         for name, subset in self.predict_set.items():
             for i in self.predict_indices[name]:
                 morph, affix, base = self.parse_output(output_texts[j])
-                subset[i][self.predict_lang]["neoseg_morph"] = morph
-                subset[i][self.predict_lang]["neoseg_affix"] = affix
-                subset[i][self.predict_lang]["neoseg_base"] = base
+                subset[i][self.predict_lang][f"{predict_prefix}_morph"] = morph
+                subset[i][self.predict_lang][f"{predict_prefix}_affix"] = affix
+                subset[i][self.predict_lang][f"{predict_prefix}_base"] = base
                 j += 1
         assert j == len(output_texts)
         with open(self.predict_path, 'wt') as file:

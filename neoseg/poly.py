@@ -17,7 +17,7 @@ class MorphLabel(enum.Enum):
 NATIVE_COMPOUND = re.compile("((PROPN|NOUN|VERB) (PUNCT )?(PROPN|NOUN))|((VERB) (PUNCT )?VERB)")
 
 
-def tag(tagger, items, lang="fr"):
+def tag(tagger, items, lang="fr", predict_prefix="neoseg"):
     indices, texts = [], []
     for i, item in enumerate(tqdm(items, desc="POS tagging")):
         text = item[lang]["text"].strip()
@@ -39,13 +39,13 @@ def tag(tagger, items, lang="fr"):
         #                   -> keep the syntactic root as pseudo-base and syntactic child as pseudo-affix
         if len(pos) > 1:
             if {'ADP', 'DET', 'CCONJ'} & set(pos):
-                item[lang]["neoseg_morph"] = [MorphLabel.Syntagm.name]
+                item[lang][f"{predict_prefix}_morph"] = [MorphLabel.Syntagm.name]
             elif NATIVE_COMPOUND.search(" ".join(pos)) is not None:
-                item[lang]["neoseg_morph"] = [MorphLabel.Compound.name]
+                item[lang][f"{predict_prefix}_morph"] = [MorphLabel.Compound.name]
             else:
-                item[lang]["neoseg_morph"] = [MorphLabel.Syntagm.name]
-            item[lang]["neoseg_base"] = root
-            item[lang]["neoseg_affix"] = child
+                item[lang][f"{predict_prefix}_morph"] = [MorphLabel.Syntagm.name]
+            item[lang][f"{predict_prefix}_base"] = root
+            item[lang][f"{predict_prefix}_affix"] = child
         else:
             indices.append(i)
             texts.append(text)
