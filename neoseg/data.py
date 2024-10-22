@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-import pytorch_lightning as pl
+import lightning
 import spacy
 import torch
 from torch.utils.data import DataLoader
@@ -41,7 +41,7 @@ def read_pandas(path):
     return [row for _, row in df.iterrows()]
 
 
-class DataModule(pl.LightningDataModule):
+class DataModule(lightning.LightningDataModule):
     def __init__(self, train_path: Path, dev_path: Path, test_path: Path, tokenizer_name: str = None,
                  predict_path: Path = None, predict_lang: str = "fr", predict_prefix: str = "neoseg",
                  pre_token: str = "<pre>", suff_token: str = "<suff>", poly_predict: bool = True,

@@ -1,10 +1,10 @@
-import pytorch_lightning as pl
-from pytorch_lightning.cli import LightningCLI
+import lightning
+from lightning.pytorch.cli import LightningCLI
 
 
 def main():
     cli = LightningCLI(
-        trainer_class=pl.Trainer,
+        trainer_class=lightning.pytorch.Trainer,
         seed_everything_default=0
     )
     return cli

@@ -2,12 +2,11 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
 from torch import nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
-import pytorch_lightning as pl
+import lightning
 from torchmetrics import MetricCollection
 from torchmetrics.classification import BinaryAccuracy, BinaryPrecision, BinaryRecall, BinaryF1Score
 from transformers import AutoModelForSeq2SeqLM
@@ -53,7 +52,7 @@ class LinearLRWithWarmup(LambdaLR):
         )
 
 
-class Trainee(pl.LightningModule):
+class Trainee(lightning.LightningModule):
     def __init__(self, *args, max_length=None, vocab_size=None, warmup_steps=0, lr=2e-5, betas=(0.9, 0.999), eps=1e-08,
                  weight_decay=1e-2, lstm_kwargs: LSTMKwargs = LSTMKwargs(), pretrained_model: str = None, **kwargs):
         super().__init__(*args, **kwargs)
