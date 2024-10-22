@@ -48,7 +48,7 @@ class DataModule(pl.LightningDataModule):
     SUFF_TOKEN = "<suff>"
 
     def __init__(self, train_path: Path, dev_path: Path, test_path: Path, tokenizer_name: str = None,
-                 predict_path: Path = None, predict_lang: str = "fr",
+                 predict_path: Path = None, predict_lang: str = "fr", poly_predict: bool = True,
                  tokenizer_kwargs: TokenizerKwargs = TokenizerKwargs(), data_kwargs: DataKwargs = DataKwargs()):
         super().__init__()
         self.train_path = train_path
@@ -56,6 +56,7 @@ class DataModule(pl.LightningDataModule):
         self.test_path = test_path
         self.predict_path = predict_path
         self.predict_lang = predict_lang
+        self.poly_predict = poly_predict
         self.data_kwargs = asdict(data_kwargs)
         self.tokenizer = PreTrainedTokenizerFast.from_pretrained(tokenizer_name)
         vocab = self.tokenizer.vocab
@@ -88,8 +89,9 @@ class DataModule(pl.LightningDataModule):
         )
 
     def predict_dataloader(self):
-        print(f"{spacy.prefer_gpu()=}")
-        tagger = spacy.load({"fr": "fr_dep_news_trf", "en": "en_core_web_trf"}[self.predict_lang], disable=["ner"])
+        if self.poly_predict:
+            print(f"{spacy.prefer_gpu()=}")
+            tagger = spacy.load({"fr": "fr_dep_news_trf", "en": "en_core_web_trf"}[self.predict_lang], disable=["ner"])
 
         with open(self.predict_path, 'rt') as file:
             self.predict_set = json.load(file)
@@ -97,7 +99,11 @@ class DataModule(pl.LightningDataModule):
         self.predict_indices = {}
         predict_texts = []
         for name, subset in self.predict_set.items():
-            indices, texts = tag(tagger, subset, lang=self.predict_lang)
+            if self.poly_predict:
+                indices, texts = tag(tagger, subset, lang=self.predict_lang)
+            else:
+                indices = list(range(len(subset)))
+                texts = [item[self.predict_lang]["text"].strip() for item in subset]
             self.predict_indices[name] = indices
             predict_texts.extend(texts)
         return DataLoader(
