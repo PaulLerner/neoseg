@@ -137,9 +137,9 @@ class DataModule(pl.LightningDataModule):
         for name, subset in self.predict_set.items():
             for i in self.predict_indices[name]:
                 morph, affix, base = self.parse_output(output_texts[j])
-                subset[i][self.predict_lang][f"{predict_prefix}_morph"] = morph
-                subset[i][self.predict_lang][f"{predict_prefix}_affix"] = affix
-                subset[i][self.predict_lang][f"{predict_prefix}_base"] = base
+                subset[i][self.predict_lang][f"{self.predict_prefix}_morph"] = morph
+                subset[i][self.predict_lang][f"{self.predict_prefix}_affix"] = affix
+                subset[i][self.predict_lang][f"{self.predict_prefix}_base"] = base
                 j += 1
         assert j == len(output_texts)
         with open(self.predict_path, 'wt') as file:
